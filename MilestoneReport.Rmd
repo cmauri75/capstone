@@ -1,0 +1,210 @@
+---
+title: "Coursera DataScience Capstone: Milestone Report"
+author: "Cesare Mauri"
+date: "March 2016"
+output: 
+  html_document:
+    keep_md: yes
+---
+
+This is a report for "DataScience Capstone" by Coursera.
+Ref: https://www.coursera.org/learn/data-science-project/peer/BRX21/milestone-report
+
+#Abstract
+We are going to analyze three corpora of US English text got from Blogs, News & Twitter.
+Objective of the study is to analize the text as base for a future text predicting application.
+
+#Download and load data
+```{r echo=FALSE}
+setwd("C:/TInvention/DataScience/DS10-Capstone")
+rm(list=ls(all=TRUE))
+library(stringi)
+library(ggplot2)
+library(tm)
+library(wordcloud)
+library(RWeka)
+
+set.seed(69)
+```
+
+```{r cache=TRUE}
+if (!file.exists("Dataset.zip")) {
+    fileURL <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+    download.file(fileURL, destfile = "Dataset.zip", method = "curl")
+    unzip("Dataset.zip")
+}
+
+if (!file.exists("badWords.txt")) {
+    fileURL <- "https://raw.githubusercontent.com/shutterstock/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/master/en"
+    download.file(fileURL, destfile = "badWords.txt", method = "curl")
+}
+
+lines.us.blogs <- readLines("final/en_US/en_US.blogs.txt", encoding="UTF-8")
+lines.us.news <- readLines("final/en_US/en_US.news.txt", encoding="UTF-8", warn = FALSE)
+lines.us.twitter <-readLines("final/en_US/en_US.twitter.txt", encoding="UTF-8", warn = FALSE)
+```
+
+#Task2: Exploratory Data Analysis
+
+##Base statistics
+Get some statistics about our dataset:
+
+```{r cache=TRUE}
+stri_stats_general(lines.us.blogs)
+stri_stats_general(lines.us.news)
+lines.us.twitter <- iconv(lines.us.twitter, "latin1", "ASCII", sub="")
+stri_stats_general(lines.us.twitter)
+```
+
+##Unigram analisys
+```{r echo=FALSE}
+badWords <- readLines("./badWords.txt")
+
+cleanCreateC <- function(dataSet){
+    corpus <- Corpus(VectorSource(list(dataSet)))
+    corpus <- tm_map(corpus, content_transformer(removePunctuation))
+    corpus <- tm_map(corpus, content_transformer(removeNumbers))
+    corpus <- tm_map(corpus, content_transformer(tolower))
+    corpus <- tm_map(corpus, removeWords, stopwords("english"))
+    corpus <- tm_map(corpus, removeWords, badWords)
+    corpus <- tm_map(corpus, removeWords, c('’','“','-'))
+    corpus <- tm_map(corpus, stripWhitespace)
+    corpus
+}
+
+getDF <- function (corpus) {
+    tdm <- TermDocumentMatrix(corpus)
+    m <- as.matrix(tdm)
+    v <- sort(rowSums(m),decreasing=TRUE)
+    data.frame(word = names(v),freq=v)
+}
+```
+
+```{r cache=TRUE}
+sampleBlogs <- lines.us.blogs[sample(1:length(lines.us.blogs),10000)]
+sampleNews <- lines.us.news[sample(1:length(lines.us.news),10000)]
+sampleTwitter <- lines.us.twitter[sample(1:length(lines.us.twitter),10000)]
+sample <- c(sampleBlogs,sampleNews,sampleTwitter)
+
+corpus <- cleanCreateC(sample);
+d <- getDF(corpus)
+```
+
+From evey dataset we get top 40 words and present bubble and bar plot
+```{r}
+pal <- brewer.pal(9,"BuGn")
+pal <- pal[-(1:4)]
+wordcloud(d$word, d$freq,  max.words=100, scale=c(2,.5), random.order=FALSE, colors=pal)
+
+ggplot(d[1:40,], aes(x=reorder(word,-freq),freq)) + 
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+```{r}
+s50th <- min(which(cumsum(d$freq)/sum(d$freq) > 0.5))
+s90th <- min(which(cumsum(d$freq)/sum(d$freq) > 0.9))
+len <- length(d$freq)
+```
+Analyzing the text we see that `r s50th` words (`r trunc(s50th/len*100)`%) are needed to cover 50% of word instances in our corpus. 
+`r s90th` words (`r trunc(s90th/len*100)`%) are needed to cover 90% of word instances.
+
+##2 and 3-grams analisys
+
+Top 40 Bigrams
+```{r cache=TRUE}
+BigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+bigram <- TermDocumentMatrix(corpus, control = list(tokenize = BigramTokenizer)) 
+bigramDF <- data.frame(Term = bigram$dimnames$Terms, Freq = bigram$v)
+bigramDF <- bigramDF[order(bigramDF$Freq,decreasing=TRUE),]
+
+ggplot(bigramDF[1:40,], aes(x=reorder(Term,-Freq),Freq)) + 
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Top 40 Trigrams
+```{r cache=TRUE}
+TrigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 3, max = 3))
+trigram <- TermDocumentMatrix(corpus, control = list(tokenize = TrigramTokenizer)) 
+trigramDF <- data.frame(Term = trigram$dimnames$Terms, Freq = trigram$v)
+trigramDF <- trigramDF[order(trigramDF$Freq,decreasing=TRUE),]
+
+ggplot(trigramDF[1:40,], aes(x=reorder(Term,-Freq),Freq)) + 
+    geom_bar(stat="identity") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+We've found many recurring grams, the usage of that should be a  good idea for an initial predicting model.
+
+##Other questions:
+Q: How do you evaluate how many of the words come from foreign languages? 
+
+A: An idea is importing dictionaries from foreign languages and check the presence. In any case this is not important because if words are often used in corpus that shoud be predicted, even come from foreign.
+
+Q: Can you think of a way to increase the coverage -- identifying words that may not be in the corpora or using a smaller number of words in the dictionary to cover the same number of phrases? 
+
+A: We should use synonyms to reduce the overall number of words in the text or check mispelling word replacing with correct one (using a dictionary based check)
+
+#Task 3: Modeling
+Now we're going to create a model based on n-grams that can be used to predict "next word" depending of preceding ones.
+The idea is to find all the 2,3,4-gram matching the 1,2,3 words in our text. Last word is our best candidate.
+
+```{r cache=TRUE}
+tmp   <- as.data.frame(matrix(unlist(strsplit(as.character(bigramDF$Term), " ")), ncol=2, byrow=TRUE))
+bigramDF$Term <- NULL
+bigramDF   <- cbind(tmp, bigramDF)
+colnames(bigramDF) <- c("W-1", "Word", "Freq")
+
+tmp   <- as.data.frame(matrix(unlist(strsplit(as.character(trigramDF$Term), " ")), ncol=3, byrow=TRUE))
+trigramDF$Term <- NULL
+trigramDF   <- cbind(tmp, trigramDF)
+colnames(trigramDF) <- c("W-2", "W-1", "Word", "Freq")
+
+fourgramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 4, max = 4))
+gram <- TermDocumentMatrix(corpus, control = list(tokenize = fourgramTokenizer)) 
+fourgramDF <- data.frame(Term = gram$dimnames$Terms, Freq = gram$v)
+fourgramDF <- fourgramDF[order(fourgramDF$Freq,decreasing=TRUE),]
+tmp   <- as.data.frame(matrix(unlist(strsplit(as.character(fourgramDF$Term), " ")), ncol=4, byrow=TRUE))
+fourgramDF$Term <- NULL
+fourgramDF   <- cbind(tmp, fourgramDF)
+colnames(fourgramDF) <- c("W-3","W-2", "W-1", "Word", "Freq")
+
+summary(bigramDF$Freq)
+summary(trigramDF$Freq)
+summary(fourgramDF$Freq)
+```
+
+First we look for a longer ngram, if it's not found (unseen n-gram) or in case of parity we fall back to previous one.
+
+I can use my model ad example for predicting next word after: "may start new"
+```{r}
+head(bigramDF[bigramDF$`W-1`=='new',])
+head(trigramDF[trigramDF$`W-1`=='new'&trigramDF$`W-2`=='start',])
+head(fourgramDF[fourgramDF$`W-1`=='new'&fourgramDF$`W-2`=='start'&fourgramDF$`W-3`=='may',])
+```
+So result is "picture". Removing "may" I got "year" and using only "new"" i got "york"
+
+#Further improvement
+Q: How can you efficiently store an n-gram model (think Markov Chains)?
+
+A: Next step is to remove all unusefull rows from ngrams (less frequent cases), so we will use as less space as possible, mantaining a fast seeking performance. All data will be used
+
+Q: How can you use the knowledge about word frequencies to make your model smaller and more efficient?
+
+A: 2-gram data contains a lot of 1 time occurrence, `r trunc(sum(bigramDF$Freq==1)/length(bigramDF$Freq)*100)`%, removing that data will burst performance. 3-grams and 4-grams 1 occurrence should be mantained to avoid loosing too much data; this sentence should be reconsidered after loading the entire dataset.
+
+
+Q: How many parameters do you need (i.e. how big is n in your n-gram model)?
+
+A: Good results can be obtained using 3 types of grams, using more is simple but should not increase a lot the performance.
+
+Q: How do you evaluate whether your model is any good?
+
+A: Model can be tested using a test dataset and check the accuracy
+
+Q: How can you use backoff models to estimate the probability of unobserved n-grams?
+
+A: As seen we can fall back to n-1gram
+
